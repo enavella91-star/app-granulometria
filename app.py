@@ -28,16 +28,16 @@ if uploaded_file is not None:
     st.write("### 1. Define la Escala Manualmente")
     
     # Pasamos la imagen convertida a base64 para máxima compatibilidad
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 0, 255, 0.3)",
-        stroke_width=3,
-        stroke_color="#FF00FF",
-        background_image=image, 
-        drawing_mode="rect",
-        key="canvas",
-        height=image.height,
-        width=image.width,
-    )
+  canvas_result = st_canvas(
+    fill_color="rgba(255, 0, 255, 0.3)",
+    stroke_width=3,
+    stroke_color="#FF00FF",
+    background_image=image, # Pasa el objeto PIL directamente
+    drawing_mode="rect",
+    key="canvas",
+    height=image.height,
+    width=image.width,
+)
 
     if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
         col1, col2 = st.columns(2)
@@ -62,7 +62,7 @@ if uploaded_file is not None:
             pdf.cell(190, 10, "Reporte Granulometrico", ln=True, align='C')
             
             # Ejemplo de celda corregida:
-            # pdf.cell(40, 4.5, f"Pasante: {valor}%") 
+           pdf.cell(40, 4.5, f"Pasante: {row['% Pasante']}%")
             
             pdf_output = "reporte.pdf"
             pdf.output(pdf_output)
