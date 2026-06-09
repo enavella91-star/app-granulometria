@@ -3,7 +3,6 @@ streamlit-drawable-canvas
 opencv-python-headless
 numpy
 pandas
-matplotlib
 scikit-image
 scipy
 fpdf
