@@ -1,9 +1,9 @@
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
-import cv2
 import numpy as np
 import pandas as pd
+import cv2
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
 from scipy import ndimage
@@ -16,12 +16,10 @@ st.title("📷 Análisis Granulométrico")
 uploaded_file = st.file_uploader("Sube la imagen", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Carga de imagen segura para el Canvas
     image = Image.open(uploaded_file).convert("RGB")
     
-    st.write("### 1. Define la Escala Manualmente")
-    st.write("Dibuja un rectángulo sobre el papel de referencia.")
-    
+    st.write("### 1. Define la Escala")
+    # Usamos la imagen convertida directamente
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 255, 0.3)", stroke_width=3, stroke_color="#FF00FF",
         background_image=image, drawing_mode="rect", key="canvas",
@@ -57,5 +55,4 @@ if uploaded_file is not None:
                     diam_cm = 2 * np.sqrt((cv2.contourArea(cnts[0]) / (px_por_cm**2)) / np.pi)
                     diametros.append(diam_cm * 10)
             
-            st.success(f"Análisis completado. Cantidad de partículas detectadas: {len(diametros)}")
-            st.write("Procesamiento finalizado exitosamente.")
+            st.success(f"Procesamiento finalizado. Partículas detectadas: {len(diametros)}")
