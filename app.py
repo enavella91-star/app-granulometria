@@ -16,7 +16,7 @@ from datetime import datetime
 # CONFIGURACIÓN
 # ==========================================
 st.set_page_config(page_title="Análisis Granulométrico", layout="centered")
-st.title("📷 Granulometría por Visión Artificial")
+st.title("📷 Granulometría por Visión Artificial app DEMO")
 
 DENSIDAD_SOLIDO = 2.65
 
