@@ -10,6 +10,7 @@ from scipy.interpolate import interp1d
 from fpdf import FPDF
 import tempfile
 import os
+from datetime import datetime
 
 # ==========================================
 # CONFIGURACIÓN
@@ -18,41 +19,55 @@ st.set_page_config(page_title="Análisis Granulométrico", layout="centered")
 st.title("📷 Granulometría por Visión Artificial")
 
 DENSIDAD_SOLIDO = 2.65
+
+# Diccionario ampliado desde 600 mm hasta #200
 mallas = {
+    '600 mm': 600.0, '500 mm': 500.0, '400 mm': 400.0, '300 mm': 300.0, '200 mm': 200.0, '150 mm': 150.0,
     '5"': 127.0, '4"': 101.6, '3"': 76.2, '2"': 50.8, '1.5"': 38.1, '1"': 25.4, '3/4"': 19.05,
     '1/2"': 12.7, '3/8"': 9.51, '1/4"': 6.35, '#4': 4.76, '#8': 2.38,
     '#14': 1.41, '#28': 0.595, '#48': 0.297, '#100': 0.149, '#200': 0.074
 }
 
 # ==========================================
-# INTERFAZ
+# DATOS DE LA MUESTRA (INTERFAZ)
 # ==========================================
-uploaded_file = st.file_uploader("Toma una foto o sube una imagen de las rocas", type=["jpg", "jpeg", "png"])
+st.markdown("### Datos de la Muestra")
+col_fecha, col_lugar = st.columns(2)
+with col_fecha:
+    fecha_input = st.date_input("Fecha del análisis")
+with col_lugar:
+    lugar_input = st.text_input("Lugar de donde viene la muestra", placeholder="Ej: Cantera Sur, Nivel 4")
 
+st.markdown("### Configuración de Referencia")
 col1, col2 = st.columns(2)
 with col1:
     ANCHO_PAPEL_CM = st.number_input("Ancho del papel ref. (cm)", min_value=0.1, value=14.8, step=0.1)
 with col2:
     LARGO_PAPEL_CM = st.number_input("Largo del papel ref. (cm)", min_value=0.1, value=21.0, step=0.1)
 
+uploaded_file = st.file_uploader("Sube la imagen de las rocas", type=["jpg", "jpeg", "png"])
+
 if uploaded_file is not None:
     # 1. Leer imagen
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, 1)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # Para mostrar en Streamlit
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
     st.image(img_rgb, caption="Imagen original", use_column_width=True)
     
-    if st.button("Procesar y Generar Reporte"):
+    if not lugar_input:
+        st.warning("⚠️ Por favor, ingresa el lugar de la muestra antes de procesar.")
+        
+    elif st.button("Procesar y Generar Reporte"):
         with st.spinner('Analizando imagen y calculando segmentación...'):
             
-            # 2. MEJORA: Detectar Escala y Validación Visual
+            # 2. Detectar Escala
             _, thresh_papel = cv2.threshold(img_gray, 200, 255, cv2.THRESH_BINARY)
             contornos_papel, _ = cv2.findContours(thresh_papel, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
             if not contornos_papel:
-                st.error("No se detectó el papel. Asegúrate de que esté bien iluminado y sin demasiadas sombras.")
+                st.error("No se detectó el papel. Asegúrate de que esté bien iluminado.")
                 st.stop()
                 
             contorno_mayor = max(contornos_papel, key=cv2.contourArea)
@@ -60,15 +75,7 @@ if uploaded_file is not None:
             largo_px = max(rect[1])
             px_por_cm = largo_px / LARGO_PAPEL_CM
             
-            # Dibujar el contorno detectado para que el usuario lo vea
-            img_verificacion = img_rgb.copy()
-            box = cv2.boxPoints(rect)
-            box = np.int32(box) # Corregido np.int0 que está deprecado
-            cv2.drawContours(img_verificacion, [box], 0, (0, 255, 0), 6)
-            st.success("¡Referencia detectada!")
-            st.image(img_verificacion, caption="Caja verde indica el papel detectado. Si no coincide, mejora la iluminación.", use_column_width=True)
-
-            # 3. MEJORA: CLAHE para rocas oscuras + Watershed
+            # 3. CLAHE + Watershed
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             cl_img = clahe.apply(img_gray)
             blur = cv2.GaussianBlur(cl_img, (7, 7), 0)
@@ -99,12 +106,12 @@ if uploaded_file is not None:
                 volumen_cm3 = (4/3) * np.pi * ((diametro_cm / 2) ** 3)
                 masas_g.append(volumen_cm3 * DENSIDAD_SOLIDO)
 
-            # 5. Distribución
             df_particulas = pd.DataFrame({'Diametro_mm': diametros_mm, 'Masa_g': masas_g})
             if df_particulas.empty:
-                st.error("No se pudieron detectar rocas. Intenta con una imagen de mayor contraste.")
+                st.error("No se detectaron rocas.")
                 st.stop()
                 
+            # 5. Distribución
             masa_total = df_particulas['Masa_g'].sum()
             resultados_mallas, masa_acumulada = [], 0
             aberturas = list(mallas.values())
@@ -133,6 +140,7 @@ if uploaded_file is not None:
             df_dist = pd.DataFrame(resultados_mallas)
             f_interp = interp1d(df_dist['% Pasante'], df_dist['Abertura_mm'], fill_value="extrapolate")
             p80 = float(f_interp(80.0))
+            p80_inch = p80 / 25.4 
 
             # 6. Gráfico
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -146,17 +154,20 @@ if uploaded_file is not None:
             ax.grid(True, which="both", ls="-")
             ax.legend()
             
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.markdown(f"<h2 style='text-align: center; color: #155724; background-color: #d4edda; padding: 15px; border-radius: 10px;'>"
+                        f"P80 Calculado:<br>{p80:.2f} mm &nbsp;|&nbsp; {p80_inch:.2f} pulgadas</h2>", 
+                        unsafe_allow_html=True)
             st.pyplot(fig) 
             
             # ==========================================
-            # 7. MEJORA: PDF EN UNA SOLA PÁGINA (A4)
+            # 7. GENERACIÓN DEL PDF AJUSTADO (MÁS FILAS)
             # ==========================================
             with tempfile.TemporaryDirectory() as tmpdirname:
                 img_path = os.path.join(tmpdirname, "foto.jpg")
                 plot_path = os.path.join(tmpdirname, "plot.png")
                 pdf_path = os.path.join(tmpdirname, "reporte.pdf")
                 
-                # Guardar imagen original (rgb para que mantenga colores) y gráfico
                 cv2.imwrite(img_path, cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
                 fig.savefig(plot_path, bbox_inches='tight')
                 
@@ -164,48 +175,57 @@ if uploaded_file is not None:
                 pdf.add_page()
                 pdf.set_margins(10, 10, 10)
                 
-                # Título y P80
-                pdf.set_font("Arial", 'B', 16)
-                pdf.cell(190, 10, txt="Reporte de Análisis Granulométrico", ln=True, align='C')
-                pdf.set_font("Arial", 'B', 12)
+                pdf.set_font("Arial", 'B', 15)
+                pdf.cell(190, 8, txt="Reporte de Análisis Granulométrico", ln=True, align='C')
+                
+                pdf.set_font("Arial", '', 11)
+                fecha_formateada = fecha_input.strftime("%d/%m/%Y")
+                pdf.cell(190, 6, txt=f"Fecha: {fecha_formateada}   |   Lugar: {lugar_input}", ln=True, align='C')
+                
+                pdf.set_font("Arial", 'B', 13)
                 pdf.set_text_color(0, 100, 0)
-                pdf.cell(190, 10, txt=f"P80 Calculado: {p80:.2f} mm", ln=True, align='C')
+                pdf.cell(190, 8, txt=f"P80: {p80:.2f} mm  ({p80_inch:.2f} pulgadas)", ln=True, align='C')
+                pdf.set_text_color(0, 0, 0) 
                 
-                # Imágenes lado a lado (Posición Y = 35)
-                pdf.image(img_path, x=10, y=35, w=90)
-                pdf.image(plot_path, x=105, y=35, w=95)
+                y_imagenes = pdf.get_y() + 2
                 
-                # Bajar el cursor forzosamente debajo de las imágenes (aprox Y=130)
-                pdf.set_y(130)
+                h_img, w_img = img_rgb.shape[:2]
+                aspect_ratio_img = w_img / h_img
                 
-                # Tabla centrada y compacta
-                pdf.set_font("Arial", 'B', 9)
-                pdf.set_text_color(0, 0, 0)
+                # Se reduce ligeramente el máximo a 70mm para dejar espacio a la tabla más larga
+                max_h_permitido = 70 
+                max_w_permitido = 90
                 
-                # Centrar tabla (ancho total 120mm. Margen izq = (210-120)/2 = 45)
-                margen_izq = 45
+                if (max_w_permitido / aspect_ratio_img) <= max_h_permitido:
+                    img_pdf_w = max_w_permitido
+                    img_pdf_h = max_w_permitido / aspect_ratio_img
+                else:
+                    img_pdf_h = max_h_permitido
+                    img_pdf_w = max_h_permitido * aspect_ratio_img
+
+                x_img = 10 + ((90 - img_pdf_w) / 2)
+                pdf.image(img_path, x=x_img, y=y_imagenes, w=img_pdf_w, h=img_pdf_h)
+                
+                graph_w = 95
+                graph_h = graph_w / 1.6 
+                pdf.image(plot_path, x=105, y=y_imagenes, w=graph_w, h=graph_h)
+                
+                y_max_imagenes = y_imagenes + max(img_pdf_h, graph_h)
+                pdf.set_y(y_max_imagenes + 5)
+                
+                # --- TABLA COMPACTADA ---
+                pdf.set_font("Arial", 'B', 8) # Letra más pequeña para acomodar 24 filas
+                margen_izq = 45 
                 
                 pdf.set_x(margen_izq)
-                pdf.cell(40, 7, 'Malla', 1, 0, 'C')
-                pdf.cell(40, 7, 'Abertura (mm)', 1, 0, 'C')
-                pdf.cell(40, 7, '% Pasante', 1, 1, 'C') # El '1' al final hace el salto de línea
+                pdf.cell(40, 5, 'Malla', 1, 0, 'C')
+                pdf.cell(40, 5, 'Abertura (mm)', 1, 0, 'C')
+                pdf.cell(40, 5, '% Pasante', 1, 1, 'C') 
                 
-                pdf.set_font("Arial", '', 9)
+                pdf.set_font("Arial", '', 8)
                 for index, row in df_dist.iterrows():
                     pdf.set_x(margen_izq)
-                    pdf.cell(40, 6, str(row['Malla']), 1, 0, 'C')
-                    pdf.cell(40, 6, f"{row['Abertura_mm']:.2f}", 1, 0, 'C')
-                    pdf.cell(40, 6, f"{row['% Pasante']:.2f}%", 1, 1, 'C')
-                
-                pdf.output(pdf_path)
-                
-                with open(pdf_path, "rb") as f:
-                    pdf_bytes = f.read()
-            
-            st.success("¡Análisis completado con éxito!")
-            st.download_button(
-                label="📥 Descargar Reporte en PDF (1 Hoja)",
-                data=pdf_bytes,
-                file_name="Reporte_Granulometria_Mejorado.pdf",
-                mime="application/pdf"
-            )
+                    # Altura de celda a 4.5mm para evitar que salte de hoja
+                    pdf.cell(40, 4.5, str(row['Malla']), 1, 0, 'C')
+                    pdf.cell(40, 4.5, f"{row['Abertura_mm']:.2f}", 1, 0, 'C')
+                    pdf.cell(40, 4.5, f"{row['% Pas
