@@ -6,3 +6,4 @@ matplotlib
 scikit-image
 scipy
 fpdf
+streamlit-drawable-canvas
