@@ -54,26 +54,41 @@ if uploaded_file is not None:
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    st.image(img_rgb, caption="Imagen original", use_column_width=True)
+    # ==========================================
+    # DETECCIÓN PREVIA Y VALIDACIÓN VISUAL
+    # ==========================================
+    st.markdown("---")
+    st.markdown("### 1. Verificación de Escala")
+    
+    _, thresh_papel = cv2.threshold(img_gray, 200, 255, cv2.THRESH_BINARY)
+    contornos_papel, _ = cv2.findContours(thresh_papel, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contornos_papel:
+        st.error("❌ No se detectó el papel. Asegúrate de que esté bien iluminado y sea el elemento más brillante.")
+        st.image(img_rgb, caption="Imagen original", use_column_width=True)
+        st.stop()
+        
+    contorno_mayor = max(contornos_papel, key=cv2.contourArea)
+    rect = cv2.minAreaRect(contorno_mayor)
+    largo_px = max(rect[1])
+    px_por_cm = largo_px / LARGO_PAPEL_CM
+    
+    # Dibujar la referencia antes de seguir procesando
+    img_verificacion = img_rgb.copy()
+    box = cv2.boxPoints(rect)
+    box = np.int32(box)
+    
+    # Color Magenta brillante (R=255, G=0, B=255) y línea muy gruesa (grosor 8)
+    cv2.drawContours(img_verificacion, [box], 0, (255, 0, 255), 8)
+    
+    st.image(img_verificacion, caption="Revisa que el recuadro MAGENTA coincida con tu papel de referencia.", use_column_width=True)
     
     if not lugar_input:
-        st.warning("⚠️ Por favor, ingresa el lugar de la muestra antes de procesar.")
+        st.warning("⚠️ Por favor, ingresa el lugar de la muestra arriba antes de continuar.")
         
-    elif st.button("Procesar y Generar Reporte"):
-        with st.spinner('Analizando imagen y calculando segmentación...'):
-            
-            # 2. Detectar Escala
-            _, thresh_papel = cv2.threshold(img_gray, 200, 255, cv2.THRESH_BINARY)
-            contornos_papel, _ = cv2.findContours(thresh_papel, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            if not contornos_papel:
-                st.error("No se detectó el papel. Asegúrate de que esté bien iluminado.")
-                st.stop()
-                
-            contorno_mayor = max(contornos_papel, key=cv2.contourArea)
-            rect = cv2.minAreaRect(contorno_mayor)
-            largo_px = max(rect[1])
-            px_por_cm = largo_px / LARGO_PAPEL_CM
+    # El botón ahora está condicionado a la aprobación visual del usuario
+    elif st.button("▶️ Iniciar Análisis Granulométrico"):
+        with st.spinner('Procesando segmentación y calculando malla... (Esto puede tomar unos segundos)'):
             
             # 3. CLAHE + Watershed
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
@@ -161,14 +176,16 @@ if uploaded_file is not None:
             st.pyplot(fig) 
             
             # ==========================================
-            # 7. GENERACIÓN DEL PDF AJUSTADO (MÁS FILAS)
+            # 7. GENERACIÓN DEL PDF
             # ==========================================
             with tempfile.TemporaryDirectory() as tmpdirname:
                 img_path = os.path.join(tmpdirname, "foto.jpg")
                 plot_path = os.path.join(tmpdirname, "plot.png")
                 pdf_path = os.path.join(tmpdirname, "reporte.pdf")
                 
-                cv2.imwrite(img_path, cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR))
+                # Opcional: Enviar la foto con la caja dibujada al PDF en lugar de la original
+                # Así queda constancia de la escala en el reporte
+                cv2.imwrite(img_path, cv2.cvtColor(img_verificacion, cv2.COLOR_RGB2BGR))
                 fig.savefig(plot_path, bbox_inches='tight')
                 
                 pdf = FPDF(orientation='P', unit='mm', format='A4')
@@ -189,10 +206,9 @@ if uploaded_file is not None:
                 
                 y_imagenes = pdf.get_y() + 2
                 
-                h_img, w_img = img_rgb.shape[:2]
+                h_img, w_img = img_verificacion.shape[:2]
                 aspect_ratio_img = w_img / h_img
                 
-                # Se reduce ligeramente el máximo a 70mm para dejar espacio a la tabla más larga
                 max_h_permitido = 70 
                 max_w_permitido = 90
                 
@@ -213,8 +229,7 @@ if uploaded_file is not None:
                 y_max_imagenes = y_imagenes + max(img_pdf_h, graph_h)
                 pdf.set_y(y_max_imagenes + 5)
                 
-                # --- TABLA COMPACTADA ---
-                pdf.set_font("Arial", 'B', 8) # Letra más pequeña para acomodar las filas
+                pdf.set_font("Arial", 'B', 8) 
                 margen_izq = 45 
                 
                 pdf.set_x(margen_izq)
@@ -225,7 +240,6 @@ if uploaded_file is not None:
                 pdf.set_font("Arial", '', 8)
                 for index, row in df_dist.iterrows():
                     pdf.set_x(margen_izq)
-                    # Altura de celda a 4.5mm para evitar que salte de hoja
                     pdf.cell(40, 4.5, str(row['Malla']), 1, 0, 'C')
                     pdf.cell(40, 4.5, f"{row['Abertura_mm']:.2f}", 1, 0, 'C')
                     pdf.cell(40, 4.5, f"{row['% Pasante']:.2f}%", 1, 1, 'C')
