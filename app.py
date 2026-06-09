@@ -4,19 +4,16 @@ from PIL import Image
 import cv2
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import io
 from skimage.feature import peak_local_max
 from skimage.segmentation import watershed
 from scipy import ndimage
 from scipy.interpolate import interp1d
 from fpdf import FPDF
-import tempfile
-import os
 
-st.set_page_config(page_title="Granulometría Pro", layout="wide")
+st.set_page_config(page_title="Granulometría", layout="wide")
 st.title("📷 Análisis Granulométrico")
 
-# Diccionario de Mallas
 mallas = {'600 mm': 600.0, '500 mm': 500.0, '400 mm': 400.0, '300 mm': 300.0, '200 mm': 200.0, '150 mm': 150.0,
           '5"': 127.0, '4"': 101.6, '3"': 76.2, '2"': 50.8, '1.5"': 38.1, '1"': 25.4, '3/4"': 19.05,
           '1/2"': 12.7, '3/8"': 9.51, '1/4"': 6.35, '#4': 4.76, '#8': 2.38, '#14': 1.41, 
@@ -25,26 +22,27 @@ mallas = {'600 mm': 600.0, '500 mm': 500.0, '400 mm': 400.0, '300 mm': 300.0, '2
 uploaded_file = st.file_uploader("Sube la imagen", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Procesar imagen para Canvas
-    image_cv = cv2.imdecode(np.frombuffer(uploaded_file.read(), np.uint8), 1)
-    image_rgb = cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB)
-    image_pil = Image.fromarray(image_rgb)
+    # Convertir bytes a imagen PIL correctamente
+    image = Image.open(uploaded_file).convert("RGB")
+    img_array = np.array(image)
     
     st.write("### 1. Define la Escala Manualmente")
-    canvas = st_canvas(fill_color="rgba(255, 0, 255, 0.3)", stroke_width=3, stroke_color="#FF00FF",
-                       background_image=image_pil, drawing_mode="rect", key="canvas",
-                       height=image_rgb.shape[0], width=image_rgb.shape[1])
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 0, 255, 0.3)", stroke_width=3, stroke_color="#FF00FF",
+        background_image=image, drawing_mode="rect", key="canvas",
+        height=image.height, width=image.width,
+    )
 
-    if canvas.json_data and len(canvas.json_data["objects"]) > 0:
+    if canvas_result.json_data and len(canvas_result.json_data["objects"]) > 0:
         r_ancho = st.number_input("Ancho real papel (cm)", value=14.8)
         r_largo = st.number_input("Largo real papel (cm)", value=21.0)
         
-        rect = canvas.json_data["objects"][-1]
+        rect = canvas_result.json_data["objects"][-1]
         px_por_cm = ((rect['width'] / r_ancho) + (rect['height'] / r_largo)) / 2
         
         if st.button("Procesar Análisis"):
-            # Lógica Watershed
-            gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+            # Lógica de procesamiento (Watershed simplificado)
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             cl_img = clahe.apply(gray)
             _, thresh = cv2.threshold(cv2.GaussianBlur(cl_img, (7, 7), 0), 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -68,29 +66,25 @@ if uploaded_file is not None:
             
             df = pd.DataFrame({'D': diametros, 'M': masas})
             total = df['M'].sum()
-            
             res = []
             acum = 0
             for k, v in mallas.items():
-                m_ret = df[df['D'] >= v]['M'].sum() if k == '600 mm' else df[(df['D'] < 0) & (df['D'] >= v)]['M'].sum()
+                m_ret = df[df['D'] >= v]['M'].sum()
                 porc = (m_ret / total) * 100
-                acum += porc
-                res.append({'Malla': k, 'Pasante': 100 - acum})
+                res.append({'Malla': k, 'Pasante': 100 - porc})
             
             df_final = pd.DataFrame(res)
             
-            # Generar PDF corregido
+            # Generación de PDF
             pdf = FPDF()
             pdf.add_page()
             pdf.set_font("Arial", 'B', 12)
-            pdf.cell(190, 10, "Resultados Granulometría", ln=True, align='C')
+            pdf.cell(190, 10, "Resultados Granulometria", ln=True, align='C')
             pdf.set_font("Arial", '', 8)
             for _, row in df_final.iterrows():
                 pdf.cell(60, 6, str(row['Malla']), 1)
                 pdf.cell(60, 6, f"{row['Pasante']:.2f}%", 1)
                 pdf.ln()
             
-            pdf_out = "reporte.pdf"
-            pdf.output(pdf_out)
-            with open(pdf_out, "rb") as f:
-                st.download_button("📥 Descargar PDF", f, "reporte.pdf")
+            pdf_bytes = pdf.output(dest='S').encode('latin-1')
+            st.download_button("📥 Descargar PDF", pdf_bytes, "reporte.pdf")
