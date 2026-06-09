@@ -214,7 +214,7 @@ if uploaded_file is not None:
                 pdf.set_y(y_max_imagenes + 5)
                 
                 # --- TABLA COMPACTADA ---
-                pdf.set_font("Arial", 'B', 8) # Letra más pequeña para acomodar 24 filas
+                pdf.set_font("Arial", 'B', 8) # Letra más pequeña para acomodar las filas
                 margen_izq = 45 
                 
                 pdf.set_x(margen_izq)
@@ -228,4 +228,16 @@ if uploaded_file is not None:
                     # Altura de celda a 4.5mm para evitar que salte de hoja
                     pdf.cell(40, 4.5, str(row['Malla']), 1, 0, 'C')
                     pdf.cell(40, 4.5, f"{row['Abertura_mm']:.2f}", 1, 0, 'C')
-                    pdf.cell(40, 4.5, f"{row['% Pas
+                    pdf.cell(40, 4.5, f"{row['% Pasante']:.2f}%", 1, 1, 'C')
+                
+                pdf.output(pdf_path)
+                
+                with open(pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
+            
+            st.download_button(
+                label="📥 Descargar Reporte en PDF",
+                data=pdf_bytes,
+                file_name="Reporte_Granulometria.pdf",
+                mime="application/pdf"
+            )
