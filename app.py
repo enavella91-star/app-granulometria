@@ -1,5 +1,6 @@
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
+from PIL import Image
 import cv2
 import numpy as np
 import pandas as pd
@@ -12,45 +13,38 @@ from fpdf import FPDF
 import tempfile
 import os
 
-# Configuración inicial
-st.set_page_config(page_title="Análisis Granulométrico Pro", layout="wide")
-st.title("📷 Granulometría: Escala Manual y Reporte")
+st.set_page_config(page_title="Granulometría Pro", layout="wide")
+st.title("📷 Análisis Granulométrico")
 
-DENSIDAD_SOLIDO = 2.65
-mallas = {
-    '600 mm': 600.0, '500 mm': 500.0, '400 mm': 400.0, '300 mm': 300.0, '200 mm': 200.0, '150 mm': 150.0,
-    '5"': 127.0, '4"': 101.6, '3"': 76.2, '2"': 50.8, '1.5"': 38.1, '1"': 25.4, '3/4"': 19.05,
-    '1/2"': 12.7, '3/8"': 9.51, '1/4"': 6.35, '#4': 4.76, '#8': 2.38, '#14': 1.41,
-    '#28': 0.595, '#48': 0.297, '#100': 0.149, '#200': 0.074
-}
+# Diccionario de Mallas
+mallas = {'600 mm': 600.0, '500 mm': 500.0, '400 mm': 400.0, '300 mm': 300.0, '200 mm': 200.0, '150 mm': 150.0,
+          '5"': 127.0, '4"': 101.6, '3"': 76.2, '2"': 50.8, '1.5"': 38.1, '1"': 25.4, '3/4"': 19.05,
+          '1/2"': 12.7, '3/8"': 9.51, '1/4"': 6.35, '#4': 4.76, '#8': 2.38, '#14': 1.41, 
+          '#28': 0.595, '#48': 0.297, '#100': 0.149, '#200': 0.074}
 
-uploaded_file = st.file_uploader("Sube la imagen de las rocas", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Sube la imagen", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    image = cv2.imdecode(file_bytes, 1)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    # Procesar imagen para Canvas
+    image_cv = cv2.imdecode(np.frombuffer(uploaded_file.read(), np.uint8), 1)
+    image_rgb = cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB)
+    image_pil = Image.fromarray(image_rgb)
     
-    # 1. Selector Manual de Escala
-    st.write("### 1. Definir Escala Manualmente")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        canvas = st_canvas(fill_color="rgba(255, 0, 255, 0.3)", stroke_width=3, stroke_color="#FF00FF",
-                           background_image=image, drawing_mode="rect", key="canvas", 
-                           height=image.shape[0], width=image.shape[1])
-    with col2:
-        r_ancho = st.number_input("Ancho real papel (cm)", value=14.8)
-        r_largo = st.number_input("Largo real papel (cm)", value=21.0)
-        lugar = st.text_input("Lugar de la muestra")
+    st.write("### 1. Define la Escala Manualmente")
+    canvas = st_canvas(fill_color="rgba(255, 0, 255, 0.3)", stroke_width=3, stroke_color="#FF00FF",
+                       background_image=image_pil, drawing_mode="rect", key="canvas",
+                       height=image_rgb.shape[0], width=image_rgb.shape[1])
 
     if canvas.json_data and len(canvas.json_data["objects"]) > 0:
+        r_ancho = st.number_input("Ancho real papel (cm)", value=14.8)
+        r_largo = st.number_input("Largo real papel (cm)", value=21.0)
+        
         rect = canvas.json_data["objects"][-1]
         px_por_cm = ((rect['width'] / r_ancho) + (rect['height'] / r_largo)) / 2
-        st.info(f"Escala definida: {px_por_cm:.2f} px/cm")
-
-        if st.button("Procesar Análisis Granulométrico"):
-            # 2. Segmentación (Watershed)
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        
+        if st.button("Procesar Análisis"):
+            # Lógica Watershed
+            gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             cl_img = clahe.apply(gray)
             _, thresh = cv2.threshold(cv2.GaussianBlur(cl_img, (7, 7), 0), 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -61,49 +55,42 @@ if uploaded_file is not None:
             markers, _ = ndimage.label(mask)
             labels = watershed(-dist, markers, mask=thresh)
 
-            # 3. Cálculos
+            # Cálculos
             diametros, masas = [], []
             for lab in np.unique(labels):
                 if lab == 0: continue
                 mask_roca = np.where(labels == lab, 255, 0).astype("uint8")
                 cnts, _ = cv2.findContours(mask_roca, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if cnts:
-                    area_px = cv2.contourArea(cnts[0])
-                    if area_px > 50:
-                        diam_cm = 2 * np.sqrt((area_px / (px_por_cm**2)) / np.pi)
-                        diametros.append(diam_cm * 10)
-                        masas.append(((4/3) * np.pi * ((diam_cm/2)**3)) * DENSIDAD_SOLIDO)
+                if cnts and cv2.contourArea(cnts[0]) > 50:
+                    diam_cm = 2 * np.sqrt((cv2.contourArea(cnts[0]) / (px_por_cm**2)) / np.pi)
+                    diametros.append(diam_cm * 10)
+                    masas.append(((4/3) * np.pi * ((diam_cm/2)**3)) * 2.65)
             
             df = pd.DataFrame({'D': diametros, 'M': masas})
-            total_masa = df['M'].sum()
+            total = df['M'].sum()
             
-            # 4. Distribución
             res = []
-            masa_acum = 0
+            acum = 0
             for k, v in mallas.items():
-                m_ret = df[df['D'] >= v]['M'].sum() if k == '600 mm' else df[(df['D'] < list(mallas.values())[list(mallas.keys()).index(k)-1]) & (df['D'] >= v)]['M'].sum()
-                porc = (m_ret / total_masa) * 100
-                masa_acum += porc
-                res.append({'Malla': k, 'Abertura': v, '%Pasante': 100 - masa_acum})
+                m_ret = df[df['D'] >= v]['M'].sum() if k == '600 mm' else df[(df['D'] < 0) & (df['D'] >= v)]['M'].sum()
+                porc = (m_ret / total) * 100
+                acum += porc
+                res.append({'Malla': k, 'Pasante': 100 - acum})
             
             df_final = pd.DataFrame(res)
-            p80 = float(interp1d(df_final['%Pasante'], df_final['Abertura'], fill_value="extrapolate")(80))
-
-            # 5. Generar PDF
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                pdf = FPDF(); pdf.add_page(); pdf.set_font("Arial", 'B', 16)
-                pdf.cell(190, 10, "Reporte Granulométrico", ln=True, align='C')
-                pdf.set_font("Arial", '', 12)
-                pdf.cell(190, 10, f"P80: {p80:.2f} mm | Lugar: {lugar}", ln=True, align='C')
-                
-                # Tabla
-                pdf.set_font("Arial", 'B', 8)
-                for col in ['Malla', 'Abertura', '%Pasante']: pdf.cell(60, 7, col, 1)
+            
+            # Generar PDF corregido
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(190, 10, "Resultados Granulometría", ln=True, align='C')
+            pdf.set_font("Arial", '', 8)
+            for _, row in df_final.iterrows():
+                pdf.cell(60, 6, str(row['Malla']), 1)
+                pdf.cell(60, 6, f"{row['Pasante']:.2f}%", 1)
                 pdf.ln()
-                pdf.set_font("Arial", '', 8)
-                for _, row in df_final.iterrows():
-                    pdf.cell(60, 6, str(row['Malla']), 1); pdf.cell(60, 6, f"{row['Abertura']:.2f}", 1); pdf.cell(60, 6, f"{row['%Pasante']:.2f}%", 1); pdf.ln()
-                
-                pdf.output(tmp.name)
-                with open(tmp.name, "rb") as f:
-                    st.download_button("📥 Descargar PDF", f, "reporte.pdf")
+            
+            pdf_out = "reporte.pdf"
+            pdf.output(pdf_out)
+            with open(pdf_out, "rb") as f:
+                st.download_button("📥 Descargar PDF", f, "reporte.pdf")
