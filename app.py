@@ -16,7 +16,7 @@ from datetime import datetime
 # CONFIGURACIÓN
 # ==========================================
 st.set_page_config(page_title="Análisis Granulométrico", layout="centered")
-st.title("📷 Granulometría por Visión Artificial app DEMO")
+st.title("📷 Granulometría por Visión Artificial")
 
 DENSIDAD_SOLIDO = 2.65
 
@@ -81,7 +81,7 @@ if uploaded_file is not None:
     # Color Magenta brillante (R=255, G=0, B=255) y línea muy gruesa (grosor 8)
     cv2.drawContours(img_verificacion, [box], 0, (255, 0, 255), 8)
     
-    st.image(img_verificacion, caption="Revisa que el recuadro MAGENTA coincida con tu papel de referencia. APP DEMO CREADA POR ENZO AVELLA", use_column_width=True)
+    st.image(img_verificacion, caption="Revisa que el recuadro MAGENTA coincida con tu papel de referencia.", use_column_width=True)
     
     if not lugar_input:
         st.warning("⚠️ Por favor, ingresa el lugar de la muestra arriba antes de continuar.")
